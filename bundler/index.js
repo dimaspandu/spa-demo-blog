@@ -33,10 +33,87 @@ import {
  * The runtime is injected once into the main bundle when includeRuntime = true.
  */
 const RUNTIME_CODE = (host, modules, entry) => stripComments(`
-(function(GlobalConstructor, modules, entry) {
+(function(GlobalConstructor, global, modules, entry) {
   var __modules__ = {};
   var __modulePointer__ = {};
   var __asyncModulePointer__ = {};
+
+  // Polyfill for CSSStyleSheet and adoptedStyleSheets
+  (function(global) {
+    // If browser already supports CSSStyleSheet with replaceSync, skip polyfill
+    if (typeof global.CSSStyleSheet === "function" && "replaceSync" in global.CSSStyleSheet.prototype) {
+      return;
+    }
+
+    // Polyfilled CSSStyleSheet constructor
+    function CSSStyleSheet() {
+      this._styleEl = document.createElement("style");
+      this._styleEl.setAttribute("data-polyfilled", "true");
+      var head = document.head || document.getElementsByTagName("head")[0];
+      head.appendChild(this._styleEl);
+    }
+
+    // Synchronous stylesheet replacement
+    CSSStyleSheet.prototype.replaceSync = function(cssText) {
+      if (this._styleEl.styleSheet) {
+        // For IE8 and older IE versions
+        this._styleEl.styleSheet.cssText = cssText || "";
+      } else {
+        // For modern browsers
+        this._styleEl.textContent = cssText || "";
+      }
+      return this;
+    };
+
+    // Asynchronous stylesheet replacement returning a Promise
+    CSSStyleSheet.prototype.replace = function(cssText) {
+      var self = this;
+      return new Promise(function(resolve) {
+        self.replaceSync(cssText);
+        resolve(self);
+      });
+    };
+
+    // Define adoptedStyleSheets property on the document object
+    function defineAdoptedStyleSheets(doc) {
+      if (doc.adoptedStyleSheets !== undefined) return;
+
+      var adopted = [];
+
+      // Try to define property using Object.defineProperty
+      try {
+        Object.defineProperty(doc, "adoptedStyleSheets", {
+          get: function() {
+            return adopted;
+          },
+          set: function(sheets) {
+            // Remove old stylesheets
+            for (var i = 0; i < adopted.length; i++) {
+              var old = adopted[i];
+              if (old && old._styleEl && old._styleEl.parentNode) {
+                old._styleEl.parentNode.removeChild(old._styleEl);
+              }
+            }
+            // Assign new sheets
+            adopted = sheets || [];
+            // Append new stylesheets to head
+            for (var j = 0; j < adopted.length; j++) {
+              if (adopted[j] && adopted[j]._styleEl) {
+                var head = document.head || document.getElementsByTagName("head")[0];
+                head.appendChild(adopted[j]._styleEl);
+              }
+            }
+          }
+        });
+      } catch (e) {
+        // Fallback for IE8 which does not allow defineProperty on DOM objects
+        doc.adoptedStyleSheets = adopted;
+      }
+    }
+
+    defineAdoptedStyleSheets(document);
+    global.CSSStyleSheet = CSSStyleSheet;
+  })(global);
 
   // Extract host or base path from current window URL
   function getHostFromCurrentUrl() {
@@ -217,6 +294,7 @@ const RUNTIME_CODE = (host, modules, entry) => stripComments(`
   }; 
 })(
   typeof window !== "undefined" ? Window : this,
+  typeof window !== "undefined" ? window : this,
   ${modules},
   ${entry}
 );
