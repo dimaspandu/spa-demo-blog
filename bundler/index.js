@@ -359,7 +359,11 @@ function createNode(filename) {
   if (extension === ".json") {
     productionCode = `exports.default = ${originalCode};`;
   } else if (extension === ".css") {
-    productionCode = `var raw = "${escapeForDoubleQuote(originalCode)}";if(typeof CSSStyleSheet === "undefined"){exports.default = raw;}else{var sheet = new CSSStyleSheet();sheet.replaceSync(raw);exports.default = sheet;}`;
+    productionCode = `
+      var sheet = new CSSStyleSheet();
+      sheet.replaceSync("${escapeForDoubleQuote(originalCode)}");
+      exports.default = sheet;
+    `;
   } else if (extension === ".svg" || extension === ".xml" || extension === ".html") {
     productionCode = `exports.default = "${escapeForDoubleQuote(originalCode)}";`;
   }
