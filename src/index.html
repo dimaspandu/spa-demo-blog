@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>{{TITLE}}</title>
+  <meta name="description" content="{{DESCRIPTION}}" />
+  <meta property="og:title" content="{{TITLE}}" />
+  <meta property="og:description" content="{{DESCRIPTION}}" />
+  <meta property="og:image" content="{{IMAGE}}" />
+  <meta property="og:type" content="article" />
+  <meta property="og:site_name" content="Demo Blog" />
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./globals.css">
+</head>
+<body>
+  <header class="header">
+    <div class="header__container">
+      <div class="header__brand">
+        <div class="header__logo">DB</div>
+        <div class="header__title">
+          <div class="header__title-main">Demo Blog</div>
+          <div class="header__title-sub">A tiny static blog example</div>
+        </div>
+      </div>
+      <nav class="header__nav">
+        <div class="header__logo header__logo--on-mobile">DB</div>
+        <a href="/" class="header__nav-link">Home</a>
+        <a href="/about" class="header__nav-link">About</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container" id="host">{{CONTENT}}</main>
+
+  <footer class="footer">
+    <p class="footer__text">&copy; Demo Blog — made for experimentation</p>
+  </footer>
+
+  <div id="transistor" style="background-color: rgb(17, 116, 255); bottom: 1.25rem; color: #fff; display: none; padding: 1.25rem; position: fixed; right: 1.25rem; text-align: center;">
+    <i>Wait a moment...</i>
+  </div>
+
+  <script src="./index.js" type="module"></script>
+</body>
+</html>

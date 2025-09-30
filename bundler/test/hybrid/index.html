@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Static vs Dynamic Import Attributes</title>
+</head>
+<body>
+  <h1>Static vs Dynamic Import Attributes Demo</h1>
+  <p class="styled">This text uses static styles.css</p>
+  <button id="load-dynamic">Load Dynamic Imports</button>
+  <script>
+    const scriptLoader = document.createElement("script");
+    scriptLoader.setAttribute("src", "./dist/index.js");
+    scriptLoader.onerror = function() {
+      document.head.removeChild(scriptLoader);
+      const nativeScriptLoader = document.createElement("script");
+      nativeScriptLoader.setAttribute("type", "module");
+      nativeScriptLoader.setAttribute("src", "./index.js");
+      document.head.appendChild(nativeScriptLoader);
+    };
+    document.head.appendChild(scriptLoader);
+  </script>
+</body>
+</html>

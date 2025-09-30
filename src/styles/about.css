@@ -1,0 +1,54 @@
+
+
+.about-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+
+.about-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.author-profile {
+  display: flex;
+  gap: 1rem;
+  padding: 1rem;
+  border-radius: var(--radius);
+  box-shadow: var(--drop);
+  align-items: center;
+}
+
+.author-profile__img {
+  width: 7.5rem;
+  height: 7.5rem;
+  border-radius: var(--radius);
+  object-fit: cover;
+  background: #cbd5e1;
+}
+
+.author-info__name {
+  margin: 0 0 0.5rem 0;
+  font-size: 1.25rem;
+}
+
+.author-info__role {
+  margin: 0;
+  color: var(--muted);
+  font-size: 1rem;
+}
+
+@media (max-width: 37.5rem) {
+  .author-profile {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .author-profile__img {
+    width: 100%;
+    height: auto;
+  }
+}

@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SPA-JSPlus Bundler Basic Demo</title>
+  <link href="./dist/style.css" rel="stylesheet" type="text/css" />
+</head>
+<body>
+  <figure>
+    <img alt="logo" src="./dist/assets/logo.svg" />
+  </figure>
+  <h1>SPA-JSPlus Bundler Basic Demo</h1>
+  <p>Open the browser console to see the output of the bundled code.</p>
+
+  <!-- Main bundle script -->
+  <script src="./dist/index.js"></script>
+
+  <script>
+    // Example: if your entry.js exports something
+    // you can call it like this:
+    // const app = require(0);
+    // console.log(app);
+
+    // Since the bundler automatically runs require(0),
+    // all your entry code should execute automatically
+    console.log("Bundled index.js loaded successfully!");
+  </script>
+</body>
+</html>

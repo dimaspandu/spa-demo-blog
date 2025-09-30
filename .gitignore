@@ -1,0 +1,5 @@
+# Ignore all dist folders anywhere in the project
+**/dist/
+
+# Ignore all cdn folders anywhere in the project
+**/cdn/

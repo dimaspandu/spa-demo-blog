@@ -1,0 +1,13 @@
+{
+  "copyDirs": {
+    "src/pages": "pages",
+    "src/styles": "styles"
+  },
+  "copyFiles": {
+    "src/globals.css": "globals.css"
+  },
+  "entryFile": "src/index.js",
+  "outputDirectory": "dist",
+  "pagesDirectory": "src/pages",
+  "port": 4503
+}
