@@ -11,7 +11,7 @@ export default function singleBuilder(ctx)
   ctx.builder.future(dispose =>
   {
     // Import the CSS for the article detail page
-    import("../styles/single.css", {
+    import("../styles/single.module.css", {
       with: { type: "css" }
     })
     .then(({ default: sheet }) => {

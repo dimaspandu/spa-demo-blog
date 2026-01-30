@@ -1,589 +1,533 @@
-/**
- * @license JS+ (ESM TO CJS-CLIENT) v1.0.8
- * jsplus/#/cjs-to-cjs-client.js
- *
- * Reference: https://github.com/ronami/minipack
- *
- * Copyright (c) dimaspandu
- * Licensed under MIT
- */
-
 import fs from "fs";
 import fsp from "fs/promises";
-import path from "path";
+import path, { dirname } from "path";
+import { fileURLToPath } from "url";
+import { CSS_MINIFY_LEVEL } from "./analyzer/lib/minifier/css/constants.js";
+
 import {
-  cleanUpCode,
-  cleanUpStyle,
+  convertESMToCJSWithMeta,
+  minifyCSS,
+  minifyHTML,
+  minifyJS
+} from "./analyzer.js";
+
+import {
   ensureJsExtension,
   escapeForDoubleQuote,
-  mergeRequireNetworkCalls,
-  minifyHTML,
-  minifyJS,
-  oneLineJS,
-  stripComments,
-  transpileESMToCJS
-} from "./utils/index.js";
+  isAssetExtension,
+  isModuleAsset,
+  logger,
+  mapToDistPath,
+  processAndCopyFile,
+  uglifyJS
+} from "./helper.js";
 
 /**
- * RUNTIME_CODE(host)
- * -------------------
- * Returns the runtime code as a string literal.
- * This runtime defines `$d`, a custom require/bundle loader,
- * plus polyfills for CSSStyleSheet and adoptedStyleSheets.
- * The runtime is injected once into the main bundle when includeRuntime = true.
+ * Resolve __filename and __dirname in ESM environment.
+ * Node.js does not expose these globals in ESM mode.
  */
-const RUNTIME_CODE = (host, modules, entry) => stripComments(`
-(function(GlobalConstructor, global, modules, entry) {
-  var __modules__ = {};
-  var __modulePointer__ = {};
-  var __asyncModulePointer__ = {};
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
-  // Polyfill for CSSStyleSheet and adoptedStyleSheets
-  (function(global) {
-    // If browser already supports CSSStyleSheet with replaceSync, skip polyfill
-    if (typeof global.CSSStyleSheet === "function" && "replaceSync" in global.CSSStyleSheet.prototype) {
-      return;
-    }
+/**
+ * RUNTIME_CODE(host, modules, entry)
+ * ----------------------------------
+ * Generates runtime bootstrap code as a string.
+ * This runtime is injected only into the entry bundle.
+ */
+const RUNTIME_CODE = (host, modules, entry) => {
+  const runtimeTemplatePath = path.join(__dirname, "runtime/template.js");
 
-    // Polyfilled CSSStyleSheet constructor
-    function CSSStyleSheet() {
-      this._styleEl = document.createElement("style");
-      this._styleEl.setAttribute("data-polyfilled", "true");
-      var head = document.head || document.getElementsByTagName("head")[0];
-      head.appendChild(this._styleEl);
-    }
+  logger.info("[RUNTIME] Loading runtime template:", runtimeTemplatePath);
 
-    // Synchronous stylesheet replacement
-    CSSStyleSheet.prototype.replaceSync = function(cssText) {
-      if (this._styleEl.styleSheet) {
-        // For IE8 and older IE versions
-        this._styleEl.styleSheet.cssText = cssText || "";
-      } else {
-        // For modern browsers
-        this._styleEl.textContent = cssText || "";
-      }
-      return this;
-    };
+  let template = fs.readFileSync(runtimeTemplatePath, "utf-8");
 
-    // Asynchronous stylesheet replacement returning a Promise
-    CSSStyleSheet.prototype.replace = function(cssText) {
-      var self = this;
-      return new Promise(function(resolve) {
-        self.replaceSync(cssText);
-        resolve(self);
-      });
-    };
+  /**
+   * Decide how the runtime resolves the host.
+   * If host is not provided, runtime will infer it from the current URL.
+   */
+  const injectedHost =
+    host !== undefined
+      ? JSON.stringify(host)
+      : "getHostFromCurrentUrl()";
 
-    // Define adoptedStyleSheets property on the document object
-    function defineAdoptedStyleSheets(doc) {
-      if (doc.adoptedStyleSheets !== undefined) return;
+  /**
+   * Replace runtime placeholders with actual values.
+   */
+  template = template
+    .replace(/__INJECT_MODULES__/g, modules)
+    .replace(/__INJECT_ENTRY__/g, entry)
+    .replace(/__INJECT_HOST__/g, injectedHost);
 
-      var adopted = [];
-
-      // Try to define property using Object.defineProperty
-      try {
-        Object.defineProperty(doc, "adoptedStyleSheets", {
-          get: function() {
-            return adopted;
-          },
-          set: function(sheets) {
-            // Remove old stylesheets
-            for (var i = 0; i < adopted.length; i++) {
-              var old = adopted[i];
-              if (old && old._styleEl && old._styleEl.parentNode) {
-                old._styleEl.parentNode.removeChild(old._styleEl);
-              }
-            }
-            // Assign new sheets
-            adopted = sheets || [];
-            // Append new stylesheets to head
-            for (var j = 0; j < adopted.length; j++) {
-              if (adopted[j] && adopted[j]._styleEl) {
-                var head = document.head || document.getElementsByTagName("head")[0];
-                head.appendChild(adopted[j]._styleEl);
-              }
-            }
-          }
-        });
-      } catch (e) {
-        // Fallback for IE8 which does not allow defineProperty on DOM objects
-        doc.adoptedStyleSheets = adopted;
-      }
-    }
-
-    defineAdoptedStyleSheets(document);
-    global.CSSStyleSheet = CSSStyleSheet;
-  })(global);
-
-  // Extract host or base path from current window URL
-  function getHostFromCurrentUrl() {
-    var href = window.location.href;
-    var clean = href.split(/[?#]/)[0];
-    var parts = clean.split("/");
-    var lastPart = parts[parts.length - 1];
-
-    if (lastPart && lastPart.indexOf(".") > -1) {
-      // If last part is a file, remove it
-      parts.pop();
-      return parts.join("/");
-    } else {
-      // Extract origin (protocol + host + port)
-      var originMatch = clean.match(/^(https?:\\\/\\\/[^/]+)/i);
-      return originMatch ? originMatch[1] : clean;
-    }
-  }
-
-  // Get file extension from an id string
-  function getExt(id) {
-    var parts = id.split(".");
-    return parts.length > 1 ? "." + parts.pop() : "";
-  }
-
-  // Ensure file path ends with .js
-  function ensureJsExtension(outputFilePath) {
-    var clean = outputFilePath.split(/[?#]/)[0];
-    var parts = clean.split("/");
-    var last = parts[parts.length - 1];
-
-    if (last.indexOf(".") > -1) {
-      last = last.replace(/\\\.[^.]+$/, ".js");
-    } else {
-      last = last + ".js";
-    }
-    parts[parts.length - 1] = last;
-    return parts.join("/");
-  }
-
-  // The "registry" function registers modules into the global "__modules__" object
-  // It checks if the module is already registered, and if not, it adds the module to "__modules__"
-  function registry(modules) {
-    // Iterate through each module in the 'modules' object using a traditional 'for...in' loop
-    for (var key in modules) {
-      // Ensure that the property is a direct property of 'modules', not inherited from its prototype
-      if (modules.hasOwnProperty(key)) {
-        // Check if the module with the given key is not already registered in __modules__
-        if (!__modules__[key]) {
-          // If not already registered, add it to __modules__ with the corresponding module value
-          __modules__[key] = modules[key];
-        }
-      }
-    }
-  }
-
-  // Load script asynchronously and return a Promise-like object
-  function RequireAsynchronously(idAsAPath, namespace) {
-    var actualPath = idAsAPath.replace("&", ${host !== undefined ? `"${host}"` : "getHostFromCurrentUrl()"});
-
-    var scriptLoader = document.createElement("script");
-    scriptLoader.setAttribute("src", ensureJsExtension(actualPath));
-    var head = document.head || document.getElementsByTagName("head")[0];
-    head.appendChild(scriptLoader);
-
-    var moduleId = namespace ? namespace : idAsAPath;
-
-    if (typeof Promise !== "undefined") {
-      // Promise-based async loading
-      return new Promise(function(resolve, reject) {
-        scriptLoader.onload = function() {
-          resolve(__modulePointer__[moduleId].exports);
-        };
-        scriptLoader.onerror = function(err) {
-          reject(err);
-        };
-      });
-    } else {
-      // Fallback for browsers without Promise
-      this.then = function(resolve) {
-        scriptLoader.onload = function() {
-          resolve(__modulePointer__[moduleId].exports);
-        };
-        return this;
-      };
-      this["catch"] = function(reject) {
-        scriptLoader.onerror = reject;
-        return this;
-      };
-    }
-  }
-
-  // Main require function to load modules synchronously or asynchronously
-  function require(id) {
-    if (!id) return;
-
-    var asynchronously = id.indexOf("<HTTP>") !== -1 || id.indexOf("<HTTPS>") !== -1;
-
-    if (asynchronously) {
-      // Asynchronous module loading
-      var separator = null;
-      if (id.indexOf("<HTTP>") !== -1) {
-        separator = "/<HTTP>";
-      } else if (id.indexOf("<HTTPS>") !== -1) {
-        separator = "/<HTTPS>";
-      }
-
-      var isExternalUrl = /^https?:\\\/\\\//.test(id);
-      var actualId = id.split(separator)[0];
-      var namespace = id.split(separator)[1].substring(1);
-      var moduleId = actualId + namespace;
-
-      // Reuse existing async module if already loaded
-      if (__asyncModulePointer__[moduleId]) {
-        return __asyncModulePointer__[moduleId];
-      }
-
-      var requireAsynchronously = null;
-      var hasANamespace = namespace.length > 0;
-
-      if (isExternalUrl && hasANamespace) {
-        requireAsynchronously = new RequireAsynchronously(actualId, namespace);
-      } else {
-        requireAsynchronously = new RequireAsynchronously(actualId);
-      }
-
-      __asyncModulePointer__[moduleId] = requireAsynchronously;
-      return requireAsynchronously;
-    }
-
-    // Handle synchronous modules
-    var ext = getExt(id);
-    if (!(ext === ".js" || ext === ".mjs" || ext === ".json" || ext === ".css" || ext === ".svg" || ext === ".xml" || ext === ".html")) {
-      return;
-    }
-
-    // Return already cached module if available
-    if (__modulePointer__[id]) {
-      return __modulePointer__[id].exports;
-    }
-
-    // Retrieve module definition
-    var moduleData = __modules__[id];
-    if (!moduleData) {
-      throw new Error("Module not found: " + id);
-    }
-
-    var fn = moduleData[0];
-    var mapping = moduleData[1];
-
-    // Local require function for module mapping
-    function localRequire(name) {
-      return require(mapping[name]);
-    }
-
-    // Initialize module object
-    var module = { exports: {} };
-    __modulePointer__[id] = module;
-
-    // Execute module function
-    fn(localRequire, module.exports, module);
-    return module.exports;
-  }
-
-  // Start registering modules
-  registry(modules);
-
-  // Start execution from entry module
-  require(entry);
-
-  GlobalConstructor.prototype["*pointers"] = function(address) {
-    if (address === "&registry") {
-      return registry;
-    } else if (address === "&require") {
-      return require;
-    }
-    return null;
-  }; 
-})(
-  typeof window !== "undefined" ? Window : this,
-  typeof window !== "undefined" ? window : this,
-  ${modules},
-  ${entry}
-);
-`);
+  return minifyJS(template);
+};
 
 /**
  * normalizeId(p)
  * ----------------
- * Converts a file path into an absolute normalized path using forward slashes.
+ * Normalize file paths into absolute, forward-slash-based identifiers.
+ * This guarantees stable module IDs across operating systems.
  */
 function normalizeId(p) {
   return path.resolve(p).replace(/\\/g, "/");
 }
 
 /**
- * processAndCopyFile(src, dest)
- * ------------------------------
- * Copies non-JS files (images, fonts, etc.) to destination.
- * Used for asset handling. JS files are skipped since bundler handles them.
+ * Copies a non-module asset to the output directory.
+ * HTML and CSS assets are minified before being written to disk.
+ *
+ * This function is intentionally async and fire-and-forget,
+ * as asset copying does not participate in the module graph.
  */
-async function processAndCopyFile(src, dest) {
-  await fsp.mkdir(path.dirname(dest), { recursive: true });
-  await fsp.copyFile(src, dest);
+async function copyAssetToOutput({
+  absolutePath,
+  outPath,
+  ext
+}) {
+  try {
+    await fsp.mkdir(path.dirname(outPath), { recursive: true });
+
+    if (ext === ".html") {
+      const raw = await fsp.readFile(absolutePath, "utf8");
+      const minified = minifyHTML(raw);
+
+      await fsp.writeFile(outPath, minified, "utf8");
+      logger.success(`[COPY] Minified HTML written to ${outPath}`);
+
+    } else if (ext === ".css") {
+      const raw = await fsp.readFile(absolutePath, "utf8");
+      const minified = minifyCSS(raw, {
+        level: CSS_MINIFY_LEVEL.SAFE
+      });
+
+      await fsp.writeFile(outPath, minified, "utf8");
+      logger.success(`[COPY] Minified CSS written to ${outPath}`);
+
+    } else {
+      await processAndCopyFile(absolutePath, outPath);
+      logger.success(`[COPY] Asset copied to ${outPath}`);
+    }
+  } catch (err) {
+    logger.error(err);
+  }
 }
 
 /**
- * createNode(filename)
- * ---------------------
- * Reads a file and transforms it into a node object for the dependency graph.
- * Handles special processing for CSS, JSON, HTML, SVG, and XML.
- * Transpiles JS/ESM files to CJS and strips comments.
+ * createNode(filename, separated)
+ * --------------------------------
+ * Reads and transforms a source file into a dependency graph node.
+ * Each node represents a single module.
  */
-function createNode(filename) {
-  const parts = filename.split(".");
-  const extension = parts.length > 1 ? "." + parts.pop() : "";
-  const rawCode = fs.readFileSync(filename, "utf-8");
+function createNode(filename, separated = false) {
+  logger.info(`[NODE] Processing file: ${filename}`);
 
-  // Prepare transformed code depending on file type
-  const originalCode = (function() {
-    if (extension === ".css") {
-      return cleanUpStyle(stripComments(rawCode));
+  const rawCode = fs.readFileSync(filename, "utf-8");
+  const ext = path.extname(filename);
+
+  let extraction;
+
+  /**
+   * Step 1: Transform the source code based on file type.
+   */
+  const transformedCode = (() => {
+    if (ext === ".css") {
+      return minifyCSS(rawCode, { level: CSS_MINIFY_LEVEL.SAFE });
     }
-    if (extension === ".svg" || extension === ".xml" || extension === ".html") {
+
+    if (ext === ".svg" || ext === ".xml" || ext === ".html") {
       return minifyHTML(rawCode);
     }
-    // For JS: transpile ESM -> CJS, strip comments, inline into single line
-    return mergeRequireNetworkCalls(
-      cleanUpCode(
-        transpileESMToCJS(
-          oneLineJS(
-            stripComments(rawCode)
-          )
-        )
-      )
-      .replaceAll(".http()", ".http(\"\")")
-      .replaceAll(".https()", ".https(\"\")")
-    );
-  }());
 
-  // Convert to production-ready code
-  let productionCode = originalCode;
-  if (extension === ".json") {
-    productionCode = `exports.default = ${originalCode};`;
-  } else if (extension === ".css") {
-    productionCode = `
-      var sheet = new CSSStyleSheet();
-      sheet.replaceSync("${escapeForDoubleQuote(originalCode)}");
-      exports.default = sheet;
-    `;
-  } else if (extension === ".svg" || extension === ".xml" || extension === ".html") {
-    productionCode = `exports.default = "${escapeForDoubleQuote(originalCode)}";`;
+    /**
+     * JavaScript files:
+     * Convert ESM to CommonJS and extract dependency metadata.
+     */
+    extraction = convertESMToCJSWithMeta(rawCode);
+    return extraction.code;
+  })();
+
+  /**
+   * Step 2: Wrap transformed output into CommonJS-compatible exports.
+   */
+
+  /**
+   * At this point, createNode() is only called for files that are already
+   * classified as modules by createGraph().
+   *
+   * The ".module." check below is intentionally kept as a defensive measure
+   * to make the module-wrapping logic explicit and future-proof, in case
+   * createNode() is reused or called directly in the future.
+   */
+  const isModule = filename.includes(".module.");
+
+  let productionCode = transformedCode;
+
+  if (ext === ".json" && isModule) {
+    productionCode = `exports.default=${transformedCode};`;
+
+  } else if (ext === ".css" && isModule) {
+    productionCode =
+      `var raw="${escapeForDoubleQuote(transformedCode)}";` +
+      `exports.raw=raw;` +
+      `if(typeof CSSStyleSheet==="undefined"){exports.default=raw;}` +
+      `else{var sheet=new CSSStyleSheet();sheet.replaceSync(raw);exports.default=sheet;}`;
+
+  } else if (
+    (ext === ".svg" || ext === ".xml" || ext === ".html") &&
+    isModule
+  ) {
+    productionCode =
+      `exports.default="${escapeForDoubleQuote(transformedCode)}";`;
   }
 
-  // Collect require() calls for dependency tracking
-  const requireRegex = /require\(['"](.*?)['"]\)/g;
-  const dependencies = [];
-  let match;
-  while ((match = requireRegex.exec(originalCode)) !== null) {
-    dependencies.push(match[1]);
-  }
-
-  const id = normalizeId(filename);
-
-  return {
-    id,
-    filename: id,
-    dependencies,
-    code: productionCode,
-    separated: false
+  /**
+   * Step 3: Deduplicate dependency metadata.
+   */
+  const dependencies = {
+    keys: {},
+    values: []
   };
-}
 
-/**
- * createGraph(entry, outputFilePath)
- * -----------------------------------
- * Builds a dependency graph starting from entry file.
- * Traverses require() calls, creates nodes, and resolves absolute paths.
- * Handles both local files and external separated modules (<HTTP>/<HTTPS>).
- */
-function createGraph(entry, outputFilePath) {
-  const entryNode = createNode(entry);
-  const queue = [entryNode];
-  const seen = { [entryNode.id]: entryNode };
-  const outputDir = normalizeId(path.dirname(outputFilePath));
-
-  for (const node of queue) {
-    node.mapping = {};
-    const dirname = path.dirname(node.filename);
-
-    for (const relativePath of node.dependencies) {
-      // Ignore absolute HTTP/HTTPS URLs
-      if (/^https?:\/\//.test(relativePath)) {
-        node.mapping[relativePath] = relativePath;
-      } else {
-        const absolutePath = normalizeId(path.join(dirname, relativePath));
-
-        // Detect external separated modules (<HTTP> or <HTTPS>)
-        const separated = absolutePath.includes("<HTTP>") || absolutePath.includes("<HTTPS>");
-
-        // Normalize separator for separated modules
-        let separator = null;
-        if (absolutePath.includes("<HTTP>")) {
-          separator = "/<HTTP>";
-        } else if (absolutePath.includes("<HTTPS>")) {
-          separator = "/<HTTPS>";
-        }
-
-        // Actual file path (strip separator)
-        const actualPath = separated ? absolutePath.split(separator)[0] : absolutePath;
-
-        // If unseen before, process it
-        if (!seen[actualPath]) {
-          if (
-            [".js", ".mjs", ".json", ".css", ".svg", ".xml", ".html"].includes(path.extname(actualPath))
-          ) {
-            // Treat as module dependency
-            const nextNode = createNode(actualPath);
-            seen[actualPath] = nextNode;
-            queue.push(nextNode);
-          } else {
-            // Copy non-code assets directly
-            const relativeToEntry = path.relative(path.dirname(entry), actualPath);
-            const outPath = normalizeId(path.join(outputDir, relativeToEntry));
-
-            processAndCopyFile(actualPath, outPath).catch(console.error);
-          }
-        }
-
-        // Update dependency mapping
-        if (seen[actualPath]) {
-          node.mapping[relativePath] = separated ? absolutePath : seen[actualPath].id;
-        }
-
-        // Mark as separated if external
-        if (separated) {
-          seen[actualPath].separated = true;
-        }
+  if (extraction) {
+    for (const meta of extraction.meta) {
+      if (!dependencies.keys[meta.module]) {
+        dependencies.keys[meta.module] = 1;
+        dependencies.values.push(meta);
       }
     }
   }
 
+  const id = normalizeId(filename);
+
+  logger.success(`[NODE] Successfully created node for: ${filename}`);
+
+  return {
+    id,
+    key: null,
+    filename: id,
+    dependent: [],
+    dependencies: dependencies.values,
+    code: productionCode,
+    separated
+  };
+}
+
+/**
+ * createGraph(entry, outputFilePath, defaultNamespace)
+ * ----------------------------------------------------
+ * Builds a dependency graph starting from the entry file.
+ */
+function createGraph(entry, outputFilePath, defaultNamespace) {
+  logger.info("[GRAPH] Creating dependency graph from entry:", entry);
+
+  const entryNode = createNode(entry);
+  const queue = [entryNode];
+
+  const baseDir = path.dirname(path.resolve(entry)).replaceAll("\\", "/");
+  const outputDir = normalizeId(path.dirname(outputFilePath));
+
+  /**
+   * Assign a namespaced key to the entry module.
+   */
+  entryNode.key = entryNode.id.replace(
+    `${baseDir}/`,
+    `${defaultNamespace}::`
+  );
+
+  for (const node of queue) {
+    node.mapping = {};
+    const currentDir = path.dirname(node.filename);
+
+    for (const dependency of node.dependencies) {
+      const relativePath = dependency.module;
+
+      /**
+       * Case 0: Dynamic import with non-literal argument.
+       * Example: import(finalPath)
+       *
+       * Such dependencies cannot be statically resolved and must be ignored.
+       * They are expected to be handled at runtime.
+       */
+      if (relativePath == null) {
+        logger.warn(
+          "[GRAPH] Skipping unresolved dynamic import (non-literal)",
+          {
+            importer: node.filename,
+            type: dependency.type
+          }
+        );
+        continue;
+      }
+
+      /**
+       * Case 1: HTTP / HTTPS imports.
+       * These modules are not bundled and are resolved at runtime.
+       */
+      if (/^https?:\/\//.test(relativePath)) {
+        const url = new URL(relativePath);
+        const namespace =
+          dependency.assertions.namespace || defaultNamespace;
+
+        const moduleId = `${namespace}::${url.pathname.slice(1)}`;
+        node.mapping[relativePath] = moduleId;
+
+        logger.warn(`[GRAPH] External URL skipped: ${relativePath}`);
+        continue;
+      }
+
+      /**
+       * Case 2: Local file imports.
+       */
+      const absolutePath = normalizeId(
+        path.join(currentDir, relativePath)
+      );
+
+      const ext = path.extname(absolutePath);
+      const isJS = [".js", ".mjs"].includes(ext);
+      const isModule =
+        isJS ||
+        (isAssetExtension(ext) && isModuleAsset(absolutePath));
+
+      if (isModule) {
+        logger.info(`[GRAPH] Adding dependency module: ${absolutePath}`);
+
+        const childNode = createNode(
+          absolutePath,
+          dependency.type === "dynamic"
+        );
+
+        childNode.dependent = node.id;
+        childNode.key = absolutePath.replace(
+          `${baseDir}/`,
+          `${defaultNamespace}::`
+        );
+
+        queue.push(childNode);
+      } else {
+        /**
+         * Non-JS assets are copied directly to the output directory.
+         */
+        logger.info(`[GRAPH] Copying asset dependency: ${absolutePath}`);
+
+        const relativeToEntry = path.relative(
+          path.dirname(entry),
+          absolutePath
+        );
+
+        const outPath = normalizeId(
+          path.join(outputDir, relativeToEntry)
+        );
+
+        copyAssetToOutput({
+          absolutePath,
+          outPath,
+          ext
+        });
+      }
+
+      /**
+       * Register module mapping for resolvable extensions only.
+       */
+      
+      /**
+       * Only register runtime mappings for files that are actually bundled
+       * as modules. Non-module assets must never appear in the module map,
+       * otherwise the runtime would attempt to require a non-existent module.
+       */
+      if (isModule) {
+        node.mapping[relativePath] = absolutePath.replace(
+          `${baseDir}/`,
+          `${defaultNamespace}::`
+        );
+      }
+    }
+  }
+
+  logger.success("[GRAPH] Dependency graph built successfully.");
   return queue;
 }
 
 /**
- * bundle(graph, entryFilePath, host, includeRuntime)
- * ---------------------------------------------------
- * Generates the final bundle string.
- * - includeRuntime = true: injects runtime + modules + entry execution
- * - includeRuntime = false: injects only modules (runtime assumed global)
+ * createBundle(graph, host)
+ * --------------------------
+ * Groups graph nodes into output bundles.
+ * Produces one entry bundle and multiple dynamic bundles if needed.
  */
-function bundle(graph, entryFilePath, host, includeRuntime) {
-  let modules = ``;
+function createBundle(graph, host) {
+  const bundles = Object.create(null);
+  const nodeMap = Object.create(null);
 
-  // Serialize modules into key/value pairs
-  graph.forEach((mod) => {
-    modules += `"${mod.id}": [
-      function(require, exports, module) {
-        ${mod.code}
-      },
-      ${JSON.stringify(mod.mapping)}
-    ],`;
-  });
-
-  const entryId = entryFilePath ? normalizeId(entryFilePath) : null;
-
-  if (includeRuntime) {
-    return cleanUpCode(`
-      ${RUNTIME_CODE(host, `{${modules.slice(0, -1)}}`, `"${entryId}"`)}
-    `);
-  } else {
-    return cleanUpCode(`
-      (function(global, modules, entry) {
-        global["*pointers"]("&registry")(modules);
-        global["*pointers"]("&require")(entry);
-      })(
-        typeof window !== "undefined" ? window : this,
-        {${modules.slice(0, -1)}},
-        "${entryId}"
-      );
-    `);
+  // Build fast lookup for nodes
+  for (const node of graph) {
+    nodeMap[node.id] = node;
   }
+
+  /**
+   * Ensure bundle exists
+   */
+  function ensureBundle(bundleId, entry = false) {
+    if (!bundles[bundleId]) {
+      bundles[bundleId] = {
+        entry,
+        path: bundleId,
+        files: [],
+        modules: "",
+        codes: ""
+      };
+    }
+    return bundles[bundleId];
+  }
+
+  /**
+   * STEP 0:
+   * Initialize entry bundle
+   */
+  const entryNode = graph[0];
+  entryNode.bundleId = entryNode.id;
+  ensureBundle(entryNode.bundleId, true);
+
+  /**
+   * STEP 1:
+   * Assign bundleId to every node
+   */
+  for (let i = 1; i < graph.length; i++) {
+    const node = graph[i];
+
+    // Dynamic import → own bundle
+    if (node.separated) {
+      node.bundleId = node.id;
+      ensureBundle(node.bundleId, false);
+      continue;
+    }
+
+    // Static import → inherit parent bundle
+    const parent = nodeMap[node.dependent];
+
+    if (parent && parent.bundleId) {
+      node.bundleId = parent.bundleId;
+    } else {
+      // Safety fallback (external / asset / missing parent)
+      logger.warn(
+        `[BUNDLE] Missing parent for ${node.id}, attached to entry bundle`
+      );
+      node.bundleId = entryNode.bundleId;
+    }
+  }
+
+  /**
+   * STEP 2:
+   * Attach nodes to bundles
+   */
+  for (const node of graph) {
+    const bundle = bundles[node.bundleId];
+    bundle.files.push(node);
+  }
+
+  /**
+   * STEP 3:
+   * Generate final bundle code
+   */
+  for (const bundleId in bundles) {
+    const bundle = bundles[bundleId];
+
+    for (const mod of bundle.files) {
+      bundle.modules += `"${mod.key}":[
+        function(require, exports, module, requireByHttp){
+          ${mod.code}
+        },
+        ${JSON.stringify(mod.mapping)}
+      ],`;
+    }
+
+    const entryId = bundle.files[0].key;
+
+    if (bundle.entry) {
+      logger.info("[BUNDLE] Including runtime in entry bundle");
+
+      bundle.codes = minifyJS(
+        RUNTIME_CODE(
+          host,
+          `{${bundle.modules.slice(0, -1)}}`,
+          `"${entryId}"`
+        )
+      );
+    } else {
+      logger.info("[BUNDLE] Generating dynamic bundle");
+
+      bundle.codes = minifyJS(`
+        (function(global, modules, entry){
+          global["*pointers"]("&registry")(modules);
+          global["*pointers"]("&require")(entry);
+        })(
+          typeof window !== "undefined" ? window : this,
+          {${bundle.modules.slice(0, -1)}},
+          "${entryId}"
+        );
+      `);
+    }
+
+    // Cleanup
+    delete bundle.files;
+    delete bundle.modules;
+  }
+
+  return bundles;
 }
 
 /**
- * generateOutput(outputFilePath, bundleResult)
- * ---------------------------------------------
- * Writes the final bundled code into the output file.
- * Ensures directory exists before writing.
+ * generateOutput(outputFilePath, code)
+ * ------------------------------------
+ * Writes bundled output to disk.
  */
-function generateOutput(outputFilePath, bundleResult) {
-  const outputDir = path.dirname(outputFilePath);
-  if (!fs.existsSync(outputDir)) {
-    fs.mkdirSync(outputDir, { recursive: true });
-  }
-  fs.writeFileSync(outputFilePath, bundleResult, "utf8");
-}
+function generateOutput(outputFilePath, code) {
+  logger.info(`[OUTPUT] Writing bundle to ${outputFilePath}`);
 
-let fixedBaseDir = "";
+  const dir = path.dirname(outputFilePath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+
+  fs.writeFileSync(outputFilePath, code, "utf8");
+  logger.success(`[OUTPUT] Bundle successfully written to ${outputFilePath}`);
+}
 
 /**
  * main(options)
  * ---------------
- * Entry point of the bundler.
- * Parameters:
- * - host: base host for replacing "&" placeholders
- * - entryFile: main input file path
- * - outputFile: specific output file path (optional)
- * - outputDirectory: output directory for generated bundle
- * - namespace: replacement prefix for baseDir in final code (default "&/")
- * - includeRuntime: whether to include runtime in this bundle (default true)
- *
- * Creates dependency graph, generates bundle, writes output file,
- * and recursively handles separated graphs (external modules).
+ * Bundler entry point.
+ * Orchestrates graph creation, bundling, minification, and output.
  */
 export default async function main({
+  entry,
   host,
-  entryFile,
-  outputFile,
-  outputDirectory,
-  namespace = "&/",
-  includeRuntime = true
+  namespace = "&",
+  outputDir,
+  outputFilename = "index.js",
+  uglified = false
 }) {
-  // Ensure output path ends with .js
-  const outputFilePath = ensureJsExtension(outputFile ? outputFile : path.join(outputDirectory, "index.js"));
-  
-  // Build dependency graph
-  const graph = createGraph(entryFile, outputFilePath);
-  
-  // Lock baseDir only once
-  if (!fixedBaseDir) {
-    fixedBaseDir = normalizeId(path.dirname(entryFile)) + "/";
-  }
-  const baseDir = fixedBaseDir;
+  logger.info(`[MAIN] Starting bundler for entry: ${entry}`);
 
-  // Split separated modules (<HTTP>/<HTTPS>) from main graph
-  const separatedGraphs = graph.filter(module => module.separated);
-  const mainGraph = separatedGraphs.length > 0 ? graph.filter(module => !module.separated) : graph;
-
-  // Generate main bundle
-  let code = cleanUpCode(
-    bundle(mainGraph, entryFile, host, includeRuntime)
+  const outputFilePath = ensureJsExtension(
+    path.join(outputDir, outputFilename)
   );
 
-  // Important: minify is async
-  let result = await minifyJS(code);
+  const graph = createGraph(entry, outputFilePath, namespace);
+  const bundles = createBundle(graph, host);
 
-  // Replace baseDir with namespace
-  result = result.replace(new RegExp(baseDir, "g"), namespace);
+  for (const id in bundles) {
+    const bundle = bundles[id];
+    const code = bundle.codes;
 
-  // Write main output file
-  generateOutput(outputFilePath, result);
+    logger.info("[MAIN] Minifying generated code...");
+    const result = !uglified ? code : await uglifyJS(code);
 
-  // Handle separated modules by bundling them individually without runtime
-  if (separatedGraphs.length > 0) {
-    const rootDir = entryFile.split("\\").filter(segment => !segment.includes(".js")).join("/");
-    for (const i in separatedGraphs) {
-      const separatedEntryFile = separatedGraphs[i].filename.replaceAll("/", "\\");
-      const separatedInputFilePath = separatedGraphs[i].filename.split(rootDir).join("").replaceAll("/", "\\");
-      const separatedOutputFilePath = path.join(outputDirectory, separatedInputFilePath);
-
-      main({
-        host,
-        entryFile: separatedEntryFile,
-        outputFile: separatedOutputFilePath,
-        outputDirectory,
-        namespace,
-        includeRuntime: false
-      });
+    if (bundle.entry) {
+      generateOutput(outputFilePath, result);
+    } else {
+      const mapped = mapToDistPath(bundle.path, outputDir, entry)?.destination;
+      generateOutput(ensureJsExtension(mapped), result);
     }
   }
+
+  logger.success("[MAIN] Bundling process completed successfully.");
 }

@@ -1,4 +1,4 @@
-import app from "./app.js";
+import { app } from "./app.js";
 import {
   aboutBuilder,
   error404Builder,
@@ -101,3 +101,5 @@ app.addNotifier("meet", setTransition);
  * and notifiers, and makes the SPA ready to handle navigation.
  */
 app.tap();
+
+export default app;

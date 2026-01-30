@@ -19,7 +19,7 @@ export default function aboutBuilder(ctx)
   ctx.builder.future(dispose =>
   {
     // Import the CSS for the About page
-    import("../styles/about.css", {
+    import("../styles/about.module.css", {
       with: { type: "css" }
     })
     .then(({ default: sheet }) => {

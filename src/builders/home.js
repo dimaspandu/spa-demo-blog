@@ -24,7 +24,7 @@ export default function homeBuilder(ctx)
   ctx.builder.future(dispose =>
   {
     // Import the CSS for the home page
-    import("../styles/home.css", {
+    import("../styles/home.module.css", {
       with: { type: "css" }
     })
     .then(({ default: sheet }) => {

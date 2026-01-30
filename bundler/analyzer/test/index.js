@@ -1,0 +1,15 @@
+await import("../lib/tokenizer/css/test/index.js");
+await import("../lib/tokenizer/html/test/index.js");
+await import("../lib/tokenizer/test/index.js");
+await import("../lib/minifier/css/test/index.js");
+await import("../lib/minifier/html/test/index.js");
+await import("../lib/minifier/json/test/index.js");
+await import("../lib/minifier/test/index.js");
+await import("../lib/stringifyTokens/css/test/index.js");
+await import("../lib/stringifyTokens/html/test/index.js");
+await import("../lib/stringifyTokens/json/test/index.js");
+await import("../lib/stringifyTokens/test/index.js");
+await import("../lib/extractModules/test/index.js");
+await import("../lib/transpileExportTokensToCJS/test/index.js");
+await import("../lib/transpileImportTokensToCJS/test/index.js");
+await import("../lib/convertESMToCJSWithMeta/test/index.js");
