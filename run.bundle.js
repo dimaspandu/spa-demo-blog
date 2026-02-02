@@ -9,9 +9,11 @@ import bundler from "./bundler/index.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const resolver = filePath => path.resolve(__dirname, filePath);
+const resolver = (filePath) => path.resolve(__dirname, filePath);
 
-// Read configuration JSON
+/**
+ * Read configuration JSON
+ */
 const configPath = path.join(__dirname, "config.json");
 const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
 

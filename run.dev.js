@@ -15,6 +15,10 @@ const __dirname = path.dirname(__filename);
  * This file is expected to define:
  * - port: number
  * - devDir: string
+ *
+ * Note:
+ * devDir points to the source directory (src) because this server
+ * is for development and serves unbundled source files.
  */
 const configPath = path.join(__dirname, "config.json");
 const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
@@ -46,35 +50,20 @@ const typeMap = {
  *      (SPA client-side routing fallback).
  *    - If the request IS for a static asset, return 404.
  *
- * @param {string} rootDir - Directory to serve as the web root
- * @param {number} port   - Port to listen on
+ * This server does not bundle or transform files.
+ * It is intended for quick development iteration.
  */
 function createStaticServer(rootDir, port) {
   const server = http.createServer((req, res) => {
-    /**
-     * Extract the URL path without query parameters.
-     * decodeURIComponent ensures encoded paths are handled correctly.
-     */
     const urlPath = decodeURIComponent(req.url.split("?")[0]);
 
-    /**
-     * Resolve the requested file path.
-     * "/" explicitly maps to "/index.html".
-     */
     const filePath = path.join(
       rootDir,
       urlPath === "/" ? "/index.html" : urlPath
     );
 
-    /**
-     * Attempt to read the requested file from disk.
-     */
     fs.readFile(filePath, (err, data) => {
       if (!err) {
-        /**
-         * File exists:
-         * Serve it normally with the appropriate Content-Type.
-         */
         const ext = path.extname(filePath);
         res.writeHead(200, {
           "Content-Type": typeMap[ext] || "text/plain",
@@ -84,25 +73,18 @@ function createStaticServer(rootDir, port) {
         return;
       }
 
-      /**
-       * File does not exist.
-       * Determine whether this request should fall back to SPA routing.
-       */
+      // File does not exist. Determine whether to fallback to SPA routing.
       const ext = path.extname(urlPath);
 
       /**
-       * If the URL has no file extension, assume this is
-       * a client-side route (e.g. /dashboard, /user/123).
-       * In that case, return index.html so the SPA router can handle it.
+       * SPA fallback rule:
+       * - No extension → treat as client-side route
+       * - Serve index.html so the SPA router can handle the route
        */
       if (!ext) {
         const indexPath = path.join(rootDir, "index.html");
         fs.readFile(indexPath, (indexErr, indexData) => {
           if (indexErr) {
-            /**
-             * index.html is missing or unreadable.
-             * This indicates a server or build configuration problem.
-             */
             res.writeHead(500);
             res.end("Failed to load index.html");
             return;
@@ -117,18 +99,12 @@ function createStaticServer(rootDir, port) {
         return;
       }
 
-      /**
-       * If the request was for a static asset (has an extension)
-       * and the file does not exist, return a proper 404.
-       */
+      // Static asset requested but not found
       res.writeHead(404);
       res.end("Not Found");
     });
   });
 
-  /**
-   * Start listening on the specified port.
-   */
   server.listen(port, () => {
     console.log(`✔ Dev server running at http://localhost:${port}`);
     console.log(`  Serving source from: ${rootDir}`);

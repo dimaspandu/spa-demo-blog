@@ -5,5 +5,4 @@ const app = new Spa({
 });
 
 export { app };
-
 export default app;

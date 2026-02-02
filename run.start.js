@@ -11,9 +11,6 @@ const __dirname = path.dirname(__filename);
 
 /**
  * Load server configuration from config.json.
- * This file is expected to define:
- * - port: number
- * - outputDir: string
  */
 const configPath = path.join(__dirname, "config.json");
 const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
@@ -24,51 +21,70 @@ const outputDir = path.join(__dirname, config.outputDir);
 /**
  * Build the project before starting the server.
  *
- * This ensures:
- * - dist/ is always up to date
- * - no stale bundles are served
+ * The bundler is imported dynamically to ensure the build step completes
+ * before the server starts serving files.
  */
 await import("./run.bundle.js");
 
 /**
- * Create a minimal static HTTP server for bundled output.
- *
- * Unlike `run.dev.js`, this server:
- * - Serves files from `dist/`
- * - Assumes all assets are already bundled
- *
- * @param {string} rootDir - Directory to serve as web root
- * @param {number} port   - Port to listen on
+ * Basic MIME type mapping.
+ */
+const typeMap = {
+  ".html": "text/html",
+  ".js": "application/javascript",
+  ".json": "application/json",
+  ".css": "text/css",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".svg": "image/svg+xml"
+};
+
+/**
+ * Create a minimal static HTTP server with SPA fallback support.
  */
 function createStaticServer(rootDir, port) {
   const server = http.createServer((req, res) => {
     const urlPath = decodeURIComponent(req.url.split("?")[0]);
+
     const filePath = path.join(
       rootDir,
       urlPath === "/" ? "/index.html" : urlPath
     );
 
     fs.readFile(filePath, (err, data) => {
-      if (err) {
-        res.writeHead(404);
-        res.end("Not Found");
+      if (!err) {
+        const ext = path.extname(filePath);
+        res.writeHead(200, {
+          "Content-Type": typeMap[ext] || "text/plain",
+          "Access-Control-Allow-Origin": "*"
+        });
+        res.end(data);
         return;
       }
 
-      const ext = path.extname(filePath);
-      const typeMap = {
-        ".html": "text/html",
-        ".js": "application/javascript",
-        ".json": "application/json",
-        ".css": "text/css"
-      };
+      const ext = path.extname(urlPath);
 
-      res.writeHead(200, {
-        "Content-Type": typeMap[ext] || "text/plain",
-        "Access-Control-Allow-Origin": "*"
-      });
+      // SPA fallback rule
+      if (!ext) {
+        const indexPath = path.join(rootDir, "index.html");
+        fs.readFile(indexPath, (indexErr, indexData) => {
+          if (indexErr) {
+            res.writeHead(500);
+            res.end("Failed to load index.html");
+            return;
+          }
 
-      res.end(data);
+          res.writeHead(200, {
+            "Content-Type": "text/html",
+            "Access-Control-Allow-Origin": "*"
+          });
+          res.end(indexData);
+        });
+        return;
+      }
+
+      res.writeHead(404);
+      res.end("Not Found");
     });
   });
 

@@ -350,86 +350,166 @@ function createGraph(entry, outputFilePath, defaultNamespace) {
 /**
  * createBundle(graph, host)
  * --------------------------
- * Groups graph nodes into output bundles.
- * Produces one entry bundle and multiple dynamic bundles if needed.
+ * Groups dependency graph nodes into output bundles.
+ *
+ * Design goals:
+ * 1. Entry bundle must be self-sufficient.
+ *    Any module reachable from the entry via static imports
+ *    must always be present in the entry bundle.
+ *
+ * 2. Dynamic bundles are isolated execution units.
+ *    Each dynamic entry (node.separated === true) gets its own bundle,
+ *    containing a full copy of its dependency subtree.
+ *
+ * 3. Modules may legally exist in more than one bundle.
+ *    This intentionally trades bundle size for correctness and simplicity.
+ *
+ * IMPORTANT:
+ * This function intentionally does NOT attempt to deduplicate shared modules
+ * across bundles. Doing so would require runtime-level cross-bundle resolution,
+ * which is outside the scope of this bundler.
  */
 function createBundle(graph, host) {
+  /**
+   * Bundle registry.
+   * Key   : bundleId (usually the module id of the entry module)
+   * Value : bundle metadata and generated output
+   */
   const bundles = Object.create(null);
+
+  /**
+   * Fast lookup table for graph nodes by id.
+   * This avoids repeated O(n) scans when traversing dependencies.
+   */
   const nodeMap = Object.create(null);
 
-  // Build fast lookup for nodes
   for (const node of graph) {
     nodeMap[node.id] = node;
   }
 
   /**
-   * Ensure bundle exists
+   * ensureBundle(bundleId, entry)
+   * -----------------------------
+   * Lazily creates a bundle record if it does not exist.
+   *
+   * A bundle represents a fully executable unit with:
+   * - its own module registry
+   * - its own entry module
+   *
+   * @param {string} bundleId - Unique identifier for the bundle
+   * @param {boolean} entry  - Whether this is the main entry bundle
    */
   function ensureBundle(bundleId, entry = false) {
     if (!bundles[bundleId]) {
       bundles[bundleId] = {
-        entry,
+        entry,     // Whether this bundle contains the runtime bootstrap
         path: bundleId,
-        files: [],
-        modules: "",
-        codes: ""
+        files: [], // List of module nodes included in this bundle
+        modules: "", // Serialized module definitions (string builder)
+        codes: ""  // Final generated bundle code
       };
     }
     return bundles[bundleId];
   }
 
   /**
-   * STEP 0:
-   * Initialize entry bundle
+   * By convention, graph[0] is always the entry module.
+   * This invariant is guaranteed by createGraph().
    */
   const entryNode = graph[0];
-  entryNode.bundleId = entryNode.id;
-  ensureBundle(entryNode.bundleId, true);
+  const entryBundle = ensureBundle(entryNode.id, true);
 
   /**
-   * STEP 1:
-   * Assign bundleId to every node
-   */
-  for (let i = 1; i < graph.length; i++) {
-    const node = graph[i];
-
-    // Dynamic import → own bundle
-    if (node.separated) {
-      node.bundleId = node.id;
-      ensureBundle(node.bundleId, false);
-      continue;
-    }
-
-    // Static import → inherit parent bundle
-    const parent = nodeMap[node.dependent];
-
-    if (parent && parent.bundleId) {
-      node.bundleId = parent.bundleId;
-    } else {
-      // Safety fallback (external / asset / missing parent)
-      logger.warn(
-        `[BUNDLE] Missing parent for ${node.id}, attached to entry bundle`
-      );
-      node.bundleId = entryNode.bundleId;
-    }
-  }
-
-  /**
-   * STEP 2:
-   * Attach nodes to bundles
+   * STEP 1 — ENTRY BUNDLE POPULATION
+   *
+   * The entry bundle must contain:
+   * - the entry module itself
+   * - ALL modules that are statically reachable from it
+   *
+   * Any node with `separated === false` is considered part of the static graph
+   * and must be bundled into the entry output.
+   *
+   * This guarantees that the entry bundle never depends on modules
+   * that only exist in dynamic bundles.
    */
   for (const node of graph) {
-    const bundle = bundles[node.bundleId];
-    bundle.files.push(node);
+    if (!node.separated) {
+      entryBundle.files.push(node);
+    }
   }
 
   /**
-   * STEP 3:
-   * Generate final bundle code
+   * STEP 2 — DYNAMIC BUNDLE CREATION
+   *
+   * Each dynamically imported module (node.separated === true)
+   * becomes the entry point of its own independent bundle.
+   *
+   * IMPORTANT DESIGN DECISION:
+   * Dynamic bundles receive a FULL COPY of their dependency subtree.
+   * This includes modules that may already exist in the entry bundle.
+   *
+   * This avoids cross-bundle dependency resolution and keeps the runtime simple.
+   */
+  for (const node of graph) {
+    if (!node.separated) continue;
+
+    // Each dynamic entry module gets its own bundle
+    const bundle = ensureBundle(node.id, false);
+
+    /**
+     * Collect the full dependency subtree for this dynamic entry.
+     *
+     * We perform a depth-first traversal using an explicit stack
+     * to avoid recursion and to remain deterministic.
+     */
+    const stack = [node.id];
+    const visited = new Set();
+
+    while (stack.length) {
+      const id = stack.pop();
+
+      // Prevent infinite loops in cyclic graphs
+      if (visited.has(id)) continue;
+      visited.add(id);
+
+      const mod = nodeMap[id];
+      if (!mod) continue;
+
+      // Add the module to the current dynamic bundle
+      bundle.files.push(mod);
+
+      /**
+       * Enqueue all direct dependents of the current module.
+       * The graph uses a reverse edge (child.dependent)
+       * to express dependency relationships.
+       */
+      for (const child of graph) {
+        if (child.dependent === id) {
+          stack.push(child.id);
+        }
+      }
+    }
+  }
+
+  /**
+   * STEP 3 — CODE GENERATION
+   *
+   * Convert collected module nodes into executable bundle code.
+   * Each bundle receives:
+   * - a module registry
+   * - an entry execution call
+   *
+   * Entry bundle additionally injects the runtime bootstrap.
    */
   for (const bundleId in bundles) {
     const bundle = bundles[bundleId];
 
+    /**
+     * Serialize module definitions into the runtime registry format.
+     * Each module entry consists of:
+     * - a factory function
+     * - a dependency mapping table
+     */
     for (const mod of bundle.files) {
       bundle.modules += `"${mod.key}":[
         function(require, exports, module, requireByHttp){
@@ -439,21 +519,33 @@ function createBundle(graph, host) {
       ],`;
     }
 
-    const entryId = bundle.files[0].key;
+    /**
+     * The first file in each bundle is always treated as the entry module.
+     * This ordering is guaranteed by the bundle construction logic above.
+     */
+    const entryKey = bundle.files[0].key;
 
     if (bundle.entry) {
-      logger.info("[BUNDLE] Including runtime in entry bundle");
-
+      /**
+       * ENTRY BUNDLE
+       * Injects the runtime and immediately executes the entry module.
+       */
       bundle.codes = minifyJS(
         RUNTIME_CODE(
           host,
           `{${bundle.modules.slice(0, -1)}}`,
-          `"${entryId}"`
+          `"${entryKey}"`
         )
       );
     } else {
-      logger.info("[BUNDLE] Generating dynamic bundle");
-
+      /**
+       * DYNAMIC BUNDLE
+       * Registers its modules into the global registry
+       * and then executes its own entry module.
+       *
+       * This assumes the runtime has already been initialized
+       * by the entry bundle.
+       */
       bundle.codes = minifyJS(`
         (function(global, modules, entry){
           global["*pointers"]("&registry")(modules);
@@ -461,12 +553,12 @@ function createBundle(graph, host) {
         })(
           typeof window !== "undefined" ? window : this,
           {${bundle.modules.slice(0, -1)}},
-          "${entryId}"
+          "${entryKey}"
         );
       `);
     }
 
-    // Cleanup
+    // Cleanup temporary build-only properties
     delete bundle.files;
     delete bundle.modules;
   }

@@ -15,10 +15,16 @@ import "./pages/about.html";
 import "./pages/index.html";
 import "./pages/single.html";
 
+/**
+ * Note:
+ * - ./index.html is the actual HTML shell served by the server.
+ * - ./pages/index.html is a template used by the SPA for the home page.
+ */
+
 // ------------------------------------------------------
 // Application runtime entry
 // ------------------------------------------------------
-import app from "./index.js";
+import application from "./index.js";
 
 /**
  * Retain application entry in the bundle graph.
@@ -30,4 +36,4 @@ import app from "./index.js";
  * The function is intentionally meaningless at runtime
  * but semantically meaningful for the bundler.
  */
-(() => app)(app);
+(() => application)(application);
