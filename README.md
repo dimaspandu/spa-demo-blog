@@ -1,7 +1,7 @@
-# SPA-JSPLUS — Demo Blog (Hybrid SSR + SPA)
+# SPA-JSPLUS -- Demo Blog (Hybrid SSR + SPA)
 
-SPA-JSPlus Demo Blog is a **hybrid Single Page Application (SPA)** built entirely with **vanilla JavaScript** and a **custom lightweight bundler**.
-This project is **not a framework or library** — it is an architectural reference that demonstrates how modern SPA behavior can be achieved with minimal tooling and strong semantic structure.
+SPA-JSPlus Demo Blog is a hybrid Single Page Application (SPA) built with vanilla JavaScript and a custom lightweight bundler.
+This project is not a framework or library. It is an architectural reference that demonstrates modern SPA behavior with minimal tooling.
 
 This repository showcases how to combine:
 
@@ -12,7 +12,7 @@ This repository showcases how to combine:
 * A deterministic bundling process
 * Minimal Node.js infrastructure
 
-👉 Core repository: [https://github.com/dimaspandu/spa-jsplus](https://github.com/dimaspandu/spa-jsplus)
+Core repository: https://github.com/dimaspandu/spa-jsplus
 
 ---
 
@@ -35,19 +35,19 @@ This repository showcases how to combine:
 
 # Overview
 
-The Demo Blog demonstrates a **Hybrid SSR + SPA architecture**:
+The Demo Blog demonstrates a Hybrid SSR + SPA architecture:
 
-1. The first request returns a **fully rendered HTML document**.
+1. The first request returns a fully rendered HTML document.
 2. JavaScript hydrates the page.
 3. Navigation is intercepted and handled client-side.
 4. Subsequent transitions occur without full reloads.
 
 This approach delivers:
 
-✅ SEO compatibility
-✅ Fast navigation
-✅ Predictable rendering
-✅ Minimal runtime complexity
+* SEO compatibility
+* Fast navigation
+* Predictable rendering
+* Minimal runtime complexity
 
 ---
 
@@ -65,9 +65,9 @@ src/spa
 
 Responsibilities:
 
-* Route registration (`reactor`)
-* Error fallback (`err`)
-* Lifecycle hooks (`notifiers`)
+* Route registration (reactor)
+* Error fallback (err)
+* Lifecycle hooks (notifiers)
 * Hydration
 * Navigation orchestration
 
@@ -110,7 +110,7 @@ The project includes a lightweight bundler designed around:
 * Deterministic output
 * Minimal transformation
 
-It treats HTML as a **first-class dependency**, allowing templates to participate directly in the module graph.
+It treats HTML as a first-class dependency, allowing templates to participate directly in the module graph.
 
 ---
 
@@ -118,29 +118,29 @@ It treats HTML as a **first-class dependency**, allowing templates to participat
 
 ```
 .
-├── bundler/        # Custom JavaScript bundler
-├── dist/           # Production output
-├── doc/            # Diagrams and screenshots
-├── src/
-│   ├── builders/   # View builders
-│   ├── helpers/    # Navigation + DOM helpers
-│   ├── hydrators/  # Hydration logic
-│   ├── models/     # Data models
-│   ├── pages/      # HTML templates
-│   ├── spa/        # SPA runtime engine
-│   ├── styles/     # CSS modules / styles
-│   ├── utils/      # Utility functions
-│   ├── app.js
-│   ├── globals.css
-│   ├── index.html
-│   ├── index.js
-│   └── pre-index.js  # Bundle entry
-│
-├── config.json
-├── run.dev.js
-├── run.bundle.js
-├── run.start.js
-└── README.md
+|-- bundler/        # Custom JavaScript bundler
+|-- dist/           # Production output
+|-- doc/            # Diagrams and screenshots
+|-- src/
+|   |-- builders/   # View builders
+|   |-- helpers/    # Navigation + DOM helpers
+|   |-- hydrators/  # Hydration logic
+|   |-- models/     # Data models
+|   |-- pages/      # HTML templates
+|   |-- spa/        # SPA runtime engine
+|   |-- styles/     # CSS modules / styles
+|   |-- utils/      # Utility functions
+|   |-- app.js
+|   |-- globals.css
+|   |-- index.html
+|   |-- index.js
+|   `-- pre-index.js  # Bundle entry
+|
+|-- config.json
+|-- run.dev.js
+|-- run.bundle.js
+|-- run.start.js
+`-- README.md
 ```
 
 ---
@@ -162,7 +162,7 @@ When a browser requests a path:
 
 Navigation is intercepted and executed via the History API:
 
-* `pushState` updates the URL
+* pushState updates the URL
 * Templates are fetched or resolved
 * Builders render the next view
 * Notifiers handle transitions
@@ -175,14 +175,14 @@ No full reload occurs.
 
 Two layers exist:
 
-**Server-level**
+Server-level
 
-* Missing assets → 404
+* Missing assets -> 404
 
-**SPA-level**
+SPA-level
 
-* Unknown routes → custom 404 builder
-* Rendering failures → 500 builder
+* Unknown routes -> custom 404 builder
+* Rendering failures -> 500 builder
 
 ---
 
@@ -219,7 +219,7 @@ The no-op invocation ensures the runtime remains inside the dependency graph.
 
 ## Dev Server (No Bundling)
 
-Start a lightweight static server that serves **source files directly**:
+Start a lightweight static server that serves source files directly:
 
 ```bash
 node run.dev.js
@@ -229,10 +229,15 @@ Server characteristics:
 
 * No transformation
 * No bundling
-* Instant reload workflow
+* Auto reload on focus when source files change
 * SPA fallback support
 
-Default port is defined in `config.json`.
+Auto reload detail:
+
+* Dev server exposes `/__dev/version` (latest mtime of .js, .json, .css, .html)
+* HTML responses inject a small script that checks version on window focus and reloads on change
+
+Default port is defined in config.json.
 
 ---
 
@@ -261,14 +266,14 @@ node run.start.js
 This script:
 
 1. Executes the bundler
-2. Serves `/dist`
+2. Serves /dist
 3. Enables SPA fallback
 
 ---
 
 # Configuration
 
-`config.json`
+config.json
 
 ```json
 {
@@ -282,11 +287,11 @@ This script:
 
 ### Fields
 
-**entry** — Root of the dependency graph
-**devDir** — Directory served by the dev server
-**outputDir** — Production build target
-**uglified** — Enables minification
-**port** — Server port
+entry -- Root of the dependency graph  
+devDir -- Directory served by the dev server  
+outputDir -- Production build target  
+uglified -- Enables minification  
+port -- Server port
 
 ---
 
@@ -316,9 +321,7 @@ This demonstrates:
 
 # Demo
 
-Live demo:
-
-👉 [https://spademoblog.netlify.app/](https://spademoblog.netlify.app/)
+https://spademoblog.netlify.app/
 
 Demonstrates:
 
@@ -346,4 +349,4 @@ It is ideal for developers who want to deeply understand how SPA systems work be
 
 # License
 
-MIT License — free to use, modify, and study.
+MIT License -- free to use, modify, and study.

@@ -11,6 +11,30 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 /**
+ * Track latest file change time in the dev root.
+ */
+function getLatestMtimeMs(dir) {
+  let latest = 0;
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      latest = Math.max(latest, getLatestMtimeMs(fullPath));
+      continue;
+    }
+
+    const ext = path.extname(entry.name).toLowerCase();
+    if (![".js", ".json", ".css", ".html"].includes(ext)) continue;
+
+    const stat = fs.statSync(fullPath);
+    if (stat.mtimeMs > latest) latest = stat.mtimeMs;
+  }
+
+  return latest;
+}
+
+/**
  * Load server configuration from config.json.
  * This file is expected to define:
  * - port: number
@@ -57,6 +81,24 @@ function createStaticServer(rootDir, port) {
   const server = http.createServer((req, res) => {
     const urlPath = decodeURIComponent(req.url.split("?")[0]);
 
+    if (urlPath === "/__dev/version") {
+      const version = String(getLatestMtimeMs(rootDir));
+      res.writeHead(200, {
+        "Content-Type": "text/plain",
+        "Access-Control-Allow-Origin": "*"
+      });
+      res.end(version);
+      return;
+    }
+
+    const injectReloadScript = (html) => {
+      const inject = `\n<script>\n(function () {\n  let lastVersion = null;\n  async function checkReload() {\n    try {\n      const res = await fetch(\"/__dev/version\", { cache: \"no-store\" });\n      const version = await res.text();\n      if (lastVersion && version !== lastVersion) {\n        location.reload();\n        return;\n      }\n      lastVersion = version;\n    } catch (_) {}\n  }\n  window.addEventListener(\"focus\", checkReload);\n  checkReload();\n})();\n</script>\n`;
+      if (html.includes("</body>")) {
+        return html.replace("</body>", `${inject}</body>`);
+      }
+      return html + inject;
+    };
+
     const filePath = path.join(
       rootDir,
       urlPath === "/" ? "/index.html" : urlPath
@@ -65,11 +107,15 @@ function createStaticServer(rootDir, port) {
     fs.readFile(filePath, (err, data) => {
       if (!err) {
         const ext = path.extname(filePath);
+        let body = data;
+        if (ext === ".html") {
+          body = injectReloadScript(data.toString());
+        }
         res.writeHead(200, {
           "Content-Type": typeMap[ext] || "text/plain",
           "Access-Control-Allow-Origin": "*"
         });
-        res.end(data);
+        res.end(body);
         return;
       }
 
@@ -90,11 +136,12 @@ function createStaticServer(rootDir, port) {
             return;
           }
 
+          const body = injectReloadScript(indexData.toString());
           res.writeHead(200, {
             "Content-Type": "text/html",
             "Access-Control-Allow-Origin": "*"
           });
-          res.end(indexData);
+          res.end(body);
         });
         return;
       }
