@@ -48,6 +48,15 @@ export default function transpileExportTokensToCJS(tokens) {
     push(arr, "punctuator", "=");
   };
 
+  /** Handles export default function blocks with parameters. */
+  const handleExportDefaultFunctionBlock = (idx) => {
+    skippedIndex[idx] = 1;
+    skippedIndex[idx + 1] = 1;
+    const endIndex = getExportBlockEndIndex(tokens, idx);
+    iclosedIndex[endIndex] = 1;
+    pushExportsDotDefaultEq(bufferTokens);
+  };
+
   for (let i = 0; i < tokens.length; i++) {
     const idx = i;
     const cur = tokens[idx];
@@ -357,6 +366,62 @@ export default function transpileExportTokensToCJS(tokens) {
       }
     }
 
+    // export default async function fetchData() {}
+    else if (
+      cur.type === "keyword" &&
+      cur.value === "export" &&
+      next(1) &&
+      next(2) &&
+      next(3) &&
+      next(4) &&
+      next(5) &&
+      next(1).type === "keyword" &&
+      next(1).value === "default" &&
+      next(2).type === "identifier" &&
+      next(2).value === "async" &&
+      next(3).type === "keyword" &&
+      next(3).value === "function" &&
+      next(4).type === "identifier" &&
+      next(5).type === "punctuator" &&
+      next(5).value === "("
+    ) {
+      skippedIndex[idx] = 1;
+      skippedIndex[idx + 1] = 1;
+
+      pushExportsDotDefaultEq();
+      exportTokens.push({
+        type: next(4).type,
+        value: next(4).value
+      });
+      exportTokens.push({ type: "punctuator", value: ";" });
+    }
+
+    // export default async function () {}
+    else if (
+      cur.type === "keyword" &&
+      cur.value === "export" &&
+      next(1) &&
+      next(2) &&
+      next(3) &&
+      next(4) &&
+      next(1).type === "keyword" &&
+      next(1).value === "default" &&
+      next(2).type === "identifier" &&
+      next(2).value === "async" &&
+      next(3).type === "keyword" &&
+      next(3).value === "function" &&
+      next(4).type === "punctuator" &&
+      next(4).value === "("
+    ) {
+      skippedIndex[idx] = 1;
+      skippedIndex[idx + 1] = 1;
+
+      const endIndex = getExportBlockEndIndex(tokens, idx);
+      iclosedIndex[endIndex] = 1;
+
+      pushExportsDotDefaultEq(bufferTokens);
+    }
+
     // export default function myFunc() {}
     else if (
       cur.type === "keyword" &&
@@ -398,13 +463,7 @@ export default function transpileExportTokensToCJS(tokens) {
       next(3).type === "punctuator" &&
       next(3).value === "("
     ) {
-      skippedIndex[idx] = 1;
-      skippedIndex[idx + 1] = 1;
-
-      const endIndex = getExportBlockEndIndex(tokens, idx);
-      iclosedIndex[endIndex] = 1;
-
-      pushExportsDotDefaultEq(bufferTokens);
+      handleExportDefaultFunctionBlock(idx);
     }
 
     // export default (function (
@@ -443,14 +502,8 @@ export default function transpileExportTokensToCJS(tokens) {
       next(2).value === "class" &&
       next(3).type === "punctuator" &&
       next(3).value === "{"
-    ) {
-      skippedIndex[idx] = 1;
-      skippedIndex[idx + 1] = 1;
-
-      const endIndex = getExportBlockEndIndex(tokens, idx);
-      ensureSemicolon(tokens, endIndex + 1);
-
-      pushExportsDotDefaultEq(bufferTokens);
+     ) {
+      handleExportDefaultFunctionBlock(idx);
     }
 
     // export * from "module"

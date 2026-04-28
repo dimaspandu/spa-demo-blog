@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+# [1.2.1] - 2026-04-26
+
+## Added
+
+- Test cases for export default async function (named and anonymous) in transpileExportTokensToCJS module.
+
+---
+
 # [1.2.0] - 2026-01-25
 
 ## Added

@@ -267,6 +267,63 @@ runTest(
 );
 
 runTest(
+  "Export default async function fetchData",
+  runExportTranspileTest([
+    { type: "keyword", value: "export" },
+    { type: "keyword", value: "default" },
+    { type: "identifier", value: "async" },
+    { type: "keyword", value: "function" },
+    { type: "identifier", value: "fetchData" },
+    { type: "punctuator", value: "(" },
+    { type: "punctuator", value: ")" },
+    { type: "punctuator", value: "{" },
+    { type: "punctuator", value: "}" }
+  ]),
+  [
+    { type: "identifier", value: "async" },
+    { type: "keyword", value: "function" },
+    { type: "identifier", value: "fetchData" },
+    { type: "punctuator", value: "(" },
+    { type: "punctuator", value: ")" },
+    { type: "punctuator", value: "{" },
+    { type: "punctuator", value: "}" },
+    { type: "identifier", value: "exports" },
+    { type: "punctuator", value: "." },
+    { type: "identifier", value: "default" },
+    { type: "punctuator", value: "=" },
+    { type: "identifier", value: "fetchData" },
+    { type: "punctuator", value: ";" }
+  ]
+);
+
+runTest(
+  "Export default anonymous async function",
+  runExportTranspileTest([
+    { type: "keyword", value: "export" },
+    { type: "keyword", value: "default" },
+    { type: "identifier", value: "async" },
+    { type: "keyword", value: "function" },
+    { type: "punctuator", value: "(" },
+    { type: "punctuator", value: ")" },
+    { type: "punctuator", value: "{" },
+    { type: "punctuator", value: "}" }
+  ]),
+  [
+    { type: "identifier", value: "exports" },
+    { type: "punctuator", value: "." },
+    { type: "identifier", value: "default" },
+    { type: "punctuator", value: "=" },
+    { type: "identifier", value: "async" },
+    { type: "keyword", value: "function" },
+    { type: "punctuator", value: "(" },
+    { type: "punctuator", value: ")" },
+    { type: "punctuator", value: "{" },
+    { type: "punctuator", value: "}" },
+    { type: "punctuator", value: ";" }
+  ]
+);
+
+runTest(
   "Export default object literal",
   runExportTranspileTest([
     {
